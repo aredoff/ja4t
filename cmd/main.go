@@ -66,7 +66,8 @@ func main() {
 	if *deviceFlag == "" {
 		deviceFind, err := utils.FindInterface()
 		if err != nil {
-			panic(err)
+			fmt.Println("Error finding network device:", err)
+			return
 		}
 		device = deviceFind
 	} else {
@@ -78,14 +79,15 @@ func main() {
 	if *filterFlag != "" {
 		f, err := ja4t.CreateFilter(*filterFlag)
 		if err != nil {
-			panic(err)
+			fmt.Println("Error creating filter:", err)
+			return
 		}
 		j.SetFilter(f)
 	}
 
 	c, err := j.Listen(ctx, device)
 	if err != nil {
-		println(err.Error())
+		fmt.Println("Error listening:", err)
 		return
 	}
 
@@ -97,10 +99,13 @@ func main() {
 		var err error
 		output, err = os.Create(*outputFileFlag)
 		if err != nil {
-			panic(err)
+			fmt.Println("Error creating output file:", err)
+			return
 		}
 		defer output.Close()
 	}
+
+	buffer := utils.NewOutput(ctx, output)
 
 	outputFormat := outputFormatConsole
 	if *csvFlag {
@@ -115,6 +120,9 @@ func main() {
 			select {
 			case <-exit:
 				cancel()
+			case err := <-buffer.Error():
+				fmt.Println("Error writing to output:", err)
+				cancel()
 			case s, ok := <-c:
 				if !ok {
 					cancel()
@@ -123,21 +131,12 @@ func main() {
 
 				switch outputFormat {
 				case outputFormatCSV:
-					if _, err := output.Write([]byte(strings.Join(s.ToSlice(), ",") + "\n")); err != nil {
-						cancel()
-						return
-					}
+					buffer.Write([]byte(strings.Join(s.ToSlice(), ",") + "\n"))
 				case outputFormatJSON:
 					jsonBytes, _ := s.MarshalJSON()
-					if _, err := output.Write(append(jsonBytes, '\n')); err != nil {
-						cancel()
-						return
-					}
+					buffer.Write(append(jsonBytes, '\n'))
 				default:
-					if _, err := output.Write([]byte(s.String() + "\n")); err != nil {
-						cancel()
-						return
-					}
+					buffer.Write([]byte(s.String() + "\n"))
 				}
 			}
 		}
